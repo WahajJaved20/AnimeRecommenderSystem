@@ -1,6 +1,8 @@
 import pandas as pd
 from itertools import combinations
 from sklearn.metrics.pairwise import cosine_similarity
+import nltk
+from nltk.stem import PorterStemmer
 
 class Helpers:
     @staticmethod
@@ -160,11 +162,78 @@ class Helpers:
         return unratedAnimeMatrix
 
             
+class VectorSpaceModel:
+    def __init__(self):
+        self.sypnopsisDataset = pd.read_csv("./Dataset/anime_with_synopsis.csv")
+        self.stopwordsList = []
+        self.postingList = {}
+        self.tokens = []
+        self.documentFrequency = {}
+
+    def readStopwordsFile(self, filepath):
+        with open(filepath, "r") as file:
+            lines = file.readlines()
+        self.stopwordsList = [line.rstrip() for line in lines]
+        return lines
+
+    def isStopword(self, token):
+        if token in self.stopwordsList:
+            return True
+        else:
+            return False
+    
+    def normalizeToken(self, token):
+        normalizedToken = ""
+        for char in token:
+            if char.isalnum():
+                normalizedToken += char
+        return normalizedToken
+    
+    def casefoldToken(self, token):
+        return token.casefold()
+    
+    def hasNumber(self, token):
+        for char in token:
+            if char.isdigit():
+                return True
+        return False
+    
+    def processSypnopsis(self):
+        stemmer = PorterStemmer()
+        sypnopsis = self.sypnopsisDataset["sypnopsis"]
+        for storyNumber in range(len(sypnopsis)):
+            story = sypnopsis[storyNumber]
+            markedTokens = []
+            for token in story:
+                if not self.isStopword(token) and not self.hasNumber(token):
+                    token = self.normalizeToken(token)
+                    if token == "":
+                        continue
+                    token = self.casefoldToken(token)
+                    token = stemmer.stem(token)
+                    if token not in self.postingList.keys:
+                        self.tokens.append(token)
+                    if not token in markedTokens:
+                        if not token in self.documentFrequency.keys:
+                            self.documentFrequency[token] = 1
+                        else:
+                            self.documentFrequency[token] += 1
+                        markedTokens.append(token)
+                    found = False
+                    for i in range(len(self.postingList[token])):
+                        if self.postingList[token][i] == storyNumber:
+                            found = True
+                            self.postingList[token][i][1] += 1
+                    if not found:
+                        if len(self.postingList[token] == 0):
+                            self.postingList[token] = [[storyNumber, 1]]
+                        else:
+                            self.postingList[token].append([storyNumber, 1])
+            self.tokens.sort()
 
 class AnimeRecommenderSystem:
     def __init__(self):
         self.animeDataset = pd.read_csv("./Dataset/anime.csv")
-        self.synopsisDataset = pd.read_csv("./Dataset/anime_with_synopsis.csv")
         self.animeGenres = Helpers.extractGenres(self.animeDataset)
         self.producers = Helpers.extractProducers(self.animeDataset)
         self.licensors = Helpers.extractLicensors(self.animeDataset)
@@ -202,10 +271,14 @@ class AnimeRecommenderSystem:
         topCosineSimilarities = animeCosineSimilarities.nlargest(relevantResultsCount)
         return topCosineSimilarities
 
-    def synopsisRecommender(self):
-        pass
+    def sypnopsisRecommender(self):
+        VSM = VectorSpaceModel()
+        VSM.readStopwordsFile("./VSMUtils/Stopword-List.txt")
+        VSM.processSypnopsis()
 
 if __name__ == "__main__":
+    nltk.download('punkt')
     ARS = AnimeRecommenderSystem()
-    ARS.contentRecommender({"userAnimeIDs":[1,5,6], "userRatings":[1,2,3]},["animeGenres","studios"])
+    # ARS.contentRecommender({"userAnimeIDs":[1,5,6], "userRatings":[1,2,3]},["animeGenres","studios"])
     # ARS.permuteAndCreateUnratedAnimeMatrices()
+    ARS.sypnopsisRecommender()
