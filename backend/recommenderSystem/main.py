@@ -1,4 +1,5 @@
 import pandas as pd
+from itertools import combinations
 
 class Helpers:
     @staticmethod
@@ -120,49 +121,59 @@ class Helpers:
         return normalizedUserProfileMatrix
 
     @staticmethod
-    def createUnratedAnimeMatrix(animeDataframe, userPreferenceInformation, contentAttributes):
-        unratedAnimeMatrix = pd.DataFrame(0, index=animeDataframe['MAL_ID'], columns=list(contentAttributes[0]))
-        unratedAnimeMatrix.drop(userPreferenceInformation['userAnimeIDs'], inplace=True)
+    def createUnratedAnimeMatrix(animeDataframe, contentAttributes):
+        columns = [element for set_item in contentAttributes for element in set_item]
+        unratedAnimeMatrix = pd.DataFrame(0, index=animeDataframe['MAL_ID'], columns=columns)
         return unratedAnimeMatrix
 
-    # this works but parallelize it
+    #unratedAnimeMatrix.drop(userPreferenceInformation['userAnimeIDs'], inplace=True)
+    
     @staticmethod
-    def createUnratedOneHotEncodingMatrix(unratedAnimeMatrix, animeDataframe):
+    def createUnratedOneHotEncodingMatrix(unratedAnimeMatrix, animeDataframe, filters):
         for animeID in unratedAnimeMatrix.index:
-            print(animeID)
-            animeGenres = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Genres'].str.split(', ').tolist()[0]
-            animeProducers = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Producers'].str.split(', ').tolist()[0]
-            animeLicensors = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Licensors'].str.split(', ').tolist()[0]
-            animeStudios = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Studios'].str.split(', ').tolist()[0]
-            unratedAnimeMatrix.loc[animeID, animeGenres] = 1
-            unratedAnimeMatrix.loc[animeID, animeProducers] = 1
-            unratedAnimeMatrix.loc[animeID, animeLicensors] = 1
-            unratedAnimeMatrix.loc[animeID, animeStudios] = 1
-        print(unratedAnimeMatrix)
+            if "animeGenres" in filters:
+                animeGenres = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Genres'].str.split(', ').tolist()[0]
+                unratedAnimeMatrix.loc[animeID, animeGenres] = 1
+            if "producers" in filters:
+                animeProducers = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Producers'].str.split(', ').tolist()[0]
+                unratedAnimeMatrix.loc[animeID, animeProducers] = 1
+            if "licensors" in filters:
+                animeLicensors = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Licensors'].str.split(', ').tolist()[0]
+                unratedAnimeMatrix.loc[animeID, animeLicensors] = 1
+            if "studios" in filters:
+                animeStudios = animeDataframe[animeDataframe['MAL_ID'] == animeID]['Studios'].str.split(', ').tolist()[0]
+                unratedAnimeMatrix.loc[animeID, animeStudios] = 1
+        return unratedAnimeMatrix
 
 
 class AnimeRecommenderSystem:
     def __init__(self):
         self.animeDataset = pd.read_csv("./Dataset/anime.csv")
         self.synopsisDataset = pd.read_csv("./Dataset/anime_with_synopsis.csv")
-        self.animeGenres = None
-        self.producers = None
-        self.licensors = None
-        self.studios = None
-        self.dataMap = {
-            "animeGenres": Helpers.extractProducers(self.animeDataset),
-            "producers": Helpers.extractProducers(self.animeDataset),
-            "licensors": Helpers.extractLicensors(self.animeDataset),
-            "studios": Helpers.extractStudios(self.animeDataset),
-        }
+        self.animeGenres = Helpers.extractGenres(self.animeDataset)
+        self.producers = Helpers.extractProducers(self.animeDataset)
+        self.licensors = Helpers.extractLicensors(self.animeDataset)
+        self.studios = Helpers.extractStudios(self.animeDataset)
+        self.dataMap = [
+            "animeGenres",
+            "producers",
+            "licensors",
+            "studios"
+        ]
 
-    def activateFilters(self, filters):
-        for filter in filters:
-            setattr(self, filter, self.dataMap[filter])
-
-    def deactivateFilters(self, filters):
-        for filter in filters:
-            setattr(self, filter, None)
+    def permuteAndCreateUnratedAnimeMatrices(self):
+        categories = self.dataMap
+        powerSet = []
+        for r in range(1, len(categories) + 1):
+            combinationsList = combinations(categories, r)
+            for combination in combinationsList:
+                powerSet.append("-".join(combination))
+        for classifiers in powerSet:
+            classifier = classifiers.split("-")
+            filteredList = [getattr(self, filter) for filter in classifier]
+            unratedAnimeMatrix = Helpers.createUnratedAnimeMatrix(self.animeDataset, filteredList)
+            oneHotEncodedUnratedMatrix = Helpers.createUnratedOneHotEncodingMatrix(unratedAnimeMatrix, self.animeDataset, classifier)
+            oneHotEncodedUnratedMatrix.to_csv("./UnratedEncodings/"+str(classifiers)+".csv")
     
     def contentRecommender(self, userPreferenceInformation, filteredAnimeIDs, filters, relevantResultsCount=10):
         userAnimeMatrix = Helpers.createUserAnimeMatrix(userPreferenceInformation)
@@ -171,8 +182,8 @@ class AnimeRecommenderSystem:
         userProfileMatrix = Helpers.createUserProfileMatrix(userPreferenceInformation, self.animeDataset, filteredList)
         scaledUserProfileMatrix = Helpers.scaleUserProfileMatrix(userAnimeMatrix, userProfileMatrix)
         normalizedUserProfileMatrix = Helpers.normalizeUserProfileMatrix(scaledUserProfileMatrix, userProfileMatrix)
-        unratedAnimeMatrix = Helpers.createUnratedAnimeMatrix(self.animeDataset,userPreferenceInformation, filteredList)
-        Helpers.createUnratedOneHotEncodingMatrix(unratedAnimeMatrix, self.animeDataset)
+        # unratedAnimeMatrix = Helpers.createUnratedAnimeMatrix(self.animeDataset,userPreferenceInformation, filteredList)
+        # Helpers.createUnratedOneHotEncodingMatrix(unratedAnimeMatrix, self.animeDataset)
         self.deactivateFilters(filters)
 
     def synopsisRecommender(self):
@@ -180,4 +191,5 @@ class AnimeRecommenderSystem:
 
 if __name__ == "__main__":
     ARS = AnimeRecommenderSystem()
-    ARS.contentRecommender({"userAnimeIDs":[1,5,6], "userRatings":[1,2,3]},"",["studios","animeGenres"])
+    # ARS.contentRecommender({"userAnimeIDs":[1,5,6], "userRatings":[1,2,3]},"",["studios","animeGenres"])
+    ARS.permuteAndCreateUnratedAnimeMatrices()
