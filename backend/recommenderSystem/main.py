@@ -3,7 +3,7 @@ from itertools import combinations
 from sklearn.metrics.pairwise import cosine_similarity
 import nltk
 from nltk.stem import PorterStemmer
-
+import math
 class Helpers:
     @staticmethod
     def extractGenres(animeDataframe):
@@ -169,6 +169,7 @@ class VectorSpaceModel:
         self.postingList = {}
         self.tokens = []
         self.documentFrequency = {}
+        self.dictionary = [[] for _ in range(len(self.sypnopsisDataset["sypnopsis"]))]
 
     def readStopwordsFile(self, filepath):
         with open(filepath, "r") as file:
@@ -204,6 +205,7 @@ class VectorSpaceModel:
         for storyNumber in range(len(sypnopsis)):
             story = sypnopsis[storyNumber]
             markedTokens = []
+            story = story.split(" ")
             for token in story:
                 if not self.isStopword(token) and not self.hasNumber(token):
                     token = self.normalizeToken(token)
@@ -211,25 +213,43 @@ class VectorSpaceModel:
                         continue
                     token = self.casefoldToken(token)
                     token = stemmer.stem(token)
-                    if token not in self.postingList.keys:
+                    if token not in self.postingList:
                         self.tokens.append(token)
                     if not token in markedTokens:
-                        if not token in self.documentFrequency.keys:
+                        if not token in self.documentFrequency:
                             self.documentFrequency[token] = 1
                         else:
                             self.documentFrequency[token] += 1
                         markedTokens.append(token)
                     found = False
-                    for i in range(len(self.postingList[token])):
-                        if self.postingList[token][i] == storyNumber:
-                            found = True
-                            self.postingList[token][i][1] += 1
+                    print(token)
+                    if token in self.postingList:
+                        for i in range(len(self.postingList[token])):
+                            if self.postingList[token][i] == storyNumber:
+                                found = True
+                                self.postingList[token][i][1] += 1
                     if not found:
-                        if len(self.postingList[token] == 0):
+                        if token not in self.postingList:
                             self.postingList[token] = [[storyNumber, 1]]
                         else:
                             self.postingList[token].append([storyNumber, 1])
             self.tokens.sort()
+            totalSypnopsisCount = len(sypnopsis)
+            for i in range(0, len(self.tokens)):
+                j = 0
+                k = 1
+                while j < len(self.postingList[self.tokens[i]]) and k <= totalSypnopsisCount:
+                    if self.postingList[self.tokens[i]][j][0] == k:
+                        idf = math.log( totalSypnopsisCount/self.documentFrequency[self.tokens[i]])
+                        self.dictionary[k-1].append(self.postingList[self.tokens[i]][j][1] * idf)
+                        j += 1
+                        k += 1
+                    else:
+                        self.dictionary[k-1].append(0)
+                        k += 1
+                while k<=totalSypnopsisCount:
+                    self.dictionary[k-1].append(0)
+                    k += 1
 
 class AnimeRecommenderSystem:
     def __init__(self):
@@ -275,6 +295,7 @@ class AnimeRecommenderSystem:
         VSM = VectorSpaceModel()
         VSM.readStopwordsFile("./VSMUtils/Stopword-List.txt")
         VSM.processSypnopsis()
+        print(VSM.dictionary)
 
 if __name__ == "__main__":
     nltk.download('punkt')
